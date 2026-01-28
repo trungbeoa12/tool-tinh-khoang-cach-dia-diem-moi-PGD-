@@ -1,0 +1,4 @@
+cd "/media/trungdt2/New Volume/Work/tool_tinh_kc_dia_diem_moi"
+python tool.py --need data/DIA_DIEM_CAN_DO.xlsx --data data/data.xlsx --top_n 20 --headless 1
+cd "/media/trungdt2/New Volume/Work/tool_tinh_kc_dia_diem_moi"
+python map_viz.py --input ket_qua_top20_duong_bo.xlsx --output map_top20.html
