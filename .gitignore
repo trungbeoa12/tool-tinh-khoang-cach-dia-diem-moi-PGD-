@@ -13,6 +13,7 @@ ENV/
 *.xlsx
 *.xls
 !requirements.txt
+.~lock.*
 
 # Results
 top20_chim_bay.xlsx
