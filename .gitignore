@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# Excel files (data)
+*.xlsx
+*.xls
+!requirements.txt
+
+# Results
+top20_chim_bay.xlsx
+ket_qua_top20_duong_bo.xlsx
+map_top20.html
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Selenium
+*.log
+chromedriver
+geckodriver
