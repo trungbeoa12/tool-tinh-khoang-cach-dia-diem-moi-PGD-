@@ -7,12 +7,11 @@ import time
 from typing import Optional, Tuple
 
 from selenium import webdriver
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.common.exceptions import NoSuchElementException, TimeoutException, WebDriverException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 
 
 def create_driver(headless: bool = True, driver_path: Optional[str] = None, page_load_timeout: int = 60):
@@ -20,10 +19,16 @@ def create_driver(headless: bool = True, driver_path: Optional[str] = None, page
     options = Options()
     if headless:
         options.add_argument("--headless=new")
+    options.page_load_strategy = "eager"
     options.add_argument("--disable-gpu")
+    options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--no-sandbox")
     options.add_argument("--window-size=1280,800")
     options.add_argument("--lang=vi")
+    options.add_argument("--disable-extensions")
+    options.add_argument("--disable-background-networking")
+    options.add_argument("--disable-features=Translate,OptimizationHints,MediaRouter")
+    options.add_argument("--remote-debugging-pipe")
     service = Service(executable_path=driver_path) if driver_path else None
     driver = webdriver.Chrome(options=options, service=service)
     driver.set_page_load_timeout(page_load_timeout)
@@ -120,6 +125,24 @@ def _collect_candidate_texts(driver) -> str:
     return "\n".join(texts)
 
 
+def _has_route_content(driver) -> bool:
+    """Check whether the page already contains route-related content."""
+    texts = _collect_candidate_texts(driver)
+    if not texts:
+        return False
+    route_markers = ("km", "phút", "giờ", "min", "hour")
+    return any(marker in texts.lower() for marker in route_markers)
+
+
+def _is_session_usable(driver) -> bool:
+    """Cheap guard for sessions that were closed by Chrome/ChromeDriver."""
+    try:
+        _ = driver.current_url
+        return True
+    except Exception:
+        return False
+
+
 def get_route_distance_time(
     origin_lat: float,
     origin_lng: float,
@@ -129,11 +152,11 @@ def get_route_distance_time(
     timeout: int = 25,
     throttle_sec: float = 1.2,
     max_retries: int = 3,
-) -> Tuple[Optional[float], Optional[float], str, Optional[str]]:
+) -> Tuple[Optional[float], Optional[float], str, Optional[str], bool]:
     """
     Fetch driving distance/time using Google Maps directions.
 
-    Returns: (distance_km, duration_min, status, error_message)
+    Returns: (distance_km, duration_min, status, error_message, session_broken)
     """
     last_error = None
     url = (
@@ -146,15 +169,7 @@ def get_route_distance_time(
     for attempt in range(1, max_retries + 1):
         try:
             driver.get(url)
-            # Wait for directions card or text containing km
-            selectors = [
-                (By.CSS_SELECTOR, 'div.section-directions-trip-distance'),
-                (By.CSS_SELECTOR, 'div[data-trip-index="0"]'),
-                (By.CSS_SELECTOR, 'div[id^="section-directions-trip-0"]'),
-            ]
-            WebDriverWait(driver, timeout).until(
-                lambda d: any(len(d.find_elements(by, sel)) > 0 for by, sel in selectors)
-            )
+            WebDriverWait(driver, timeout).until(_has_route_content)
 
             # Prefer first route card text if present
             try:
@@ -168,16 +183,18 @@ def get_route_distance_time(
             duration_min = _parse_duration_min(text_blob)
             if distance_km is not None and duration_min is not None:
                 time.sleep(throttle_sec)
-                return distance_km, duration_min, "OK", None
+                return distance_km, duration_min, "OK", None, False
 
             last_error = "Không parse được distance/time"
         except TimeoutException:
             last_error = "Timeout khi tải kết quả chỉ đường"
         except NoSuchElementException:
             last_error = "Không tìm thấy phần tử kết quả"
+        except WebDriverException as exc:
+            last_error = f"Lỗi WebDriver: {exc}"
+            return None, None, "FAILED", last_error, not _is_session_usable(driver)
         except Exception as exc:  # pylint: disable=broad-except
             last_error = f"Lỗi khác: {exc}"
 
         time.sleep(throttle_sec)
-    return None, None, "FAILED", last_error
-
+    return None, None, "FAILED", last_error, False

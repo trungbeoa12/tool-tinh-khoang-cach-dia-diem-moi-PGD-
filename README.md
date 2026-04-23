@@ -1,138 +1,115 @@
-## Tool tính khoảng cách chim bay + đường bộ và vẽ bản đồ
+## Chay Project
 
-Tool này giúp:
-- **Bước 1**: Từ `DIA_DIEM_CAN_DO.xlsx` và `data.xlsx` tính **khoảng cách chim bay (Haversine)**, lấy **top N** điểm gần nhất → xuất `top20_chim_bay.xlsx`.
-- **Bước 2**: Dùng **Selenium + Google Maps** đo **khoảng cách đường bộ + thời gian lái xe** cho từng cặp trong top N → xuất `ket_qua_top20_duong_bo.xlsx`.
-- **Bước 3 (tuỳ chọn)**: Vẽ **bản đồ HTML**: điểm cần đo + 20 điểm gần, có đường nối, tooltip hiển thị khoảng cách chim bay/đường bộ → file `map_top20.html`.
+### File input can co
 
----
+Trong thu muc `data/`:
 
-## 1. Chuẩn bị dữ liệu đầu vào
+- `DIA_DIEM_CAN_DO.xlsx`
+  - cot bat buoc: `KINH ĐỘ`, `VĨ ĐỘ`
+- `data.xlsx`
+  - cot bat buoc:
+    - `Mã phòng ban 1`
+    - `Tên phòng ban 1`
+    - `KINH ĐỘ 1`
+    - `VĨ ĐỘ 1`
+    - `Mã phòng ban 2`
+    - `Tên phòng ban 2`
+    - `KINH ĐỘ 2`
+    - `VĨ ĐỘ 2`
 
-Thư mục `data/` gồm:
-- `DIA_DIEM_CAN_DO.xlsx`  
-  - Cột bắt buộc: **`KINH ĐỘ`**, **`VĨ ĐỘ`** (có dấu tiếng Việt, dạng số hoặc chuỗi có dấu phẩy/chấm).
-- `data.xlsx`  
-  - Mỗi dòng là **cặp điểm**:
-    - `Mã phòng ban 1`, `Tên phòng ban 1`, `KINH ĐỘ 1`, `VĨ ĐỘ 1`  
-    - `Mã phòng ban 2`, `Tên phòng ban 2`, `KINH ĐỘ 2`, `VĨ ĐỘ 2`  
-    - Có thể có thêm cột tỉnh/thành (tool tự nhận).
-
-**Lần sau chạy:**  
-Bạn **chỉ cần thay nội dung** 2 file:
-- `data/DIA_DIEM_CAN_DO.xlsx`
-- `data/data.xlsx`  
-Giữ nguyên tên cũ và cấu trúc cột như hiện tại → chạy lại lệnh là ra kết quả mới, **không cần sửa code**.
-
----
-
-## 2. Cài đặt môi trường
-
-Trong thư mục dự án:
+### Cai thu vien
 
 ```bash
-cd "/media/trungdt2/New Volume/Work/tool_tinh_kc_dia_diem_moi"
-python -m pip install -r requirements.txt
+cd "/Users/pro201715inch/Documents/tool_tinh_kc_diem_gd_moi"
+python3 -m venv .venv
+./.venv/bin/python -m pip install -r requirements.txt
 ```
 
-Yêu cầu:
-- Python 3.9+ (khuyến nghị).
-- Chrome + ChromeDriver (cùng version).  
-  - Nếu có internet, Selenium Manager thường tự xử lý.  
-  - Nếu không, tải `chromedriver` về và dùng tham số `--driver_path`.
-
----
-
-## 3. Chạy tool tính khoảng cách
-
-Lệnh tổng quát:
+### Chay tool tinh khoang cach
 
 ```bash
-cd "/media/trungdt2/New Volume/Work/tool_tinh_kc_dia_diem_moi"
-python tool.py \
-  --need data/DIA_DIEM_CAN_DO.xlsx \
-  --data data/data.xlsx \
-  --top_n 20 \
-  --headless 1 \
-  --driver_path "/duong/dan/toi/chromedriver"  # tuỳ chọn
+cd "/Users/pro201715inch/Documents/tool_tinh_kc_diem_gd_moi"
+./.venv/bin/python tool.py --need data/DIA_DIEM_CAN_DO.xlsx --data data/data.xlsx --top_n 20 --headless 1
 ```
 
-### Tham số
-- **`--need`**: đường dẫn tới `DIA_DIEM_CAN_DO.xlsx`.
-- **`--data`**: đường dẫn tới `data.xlsx`.
-- **`--top_n`**: số điểm gần nhất theo chim bay cần giữ lại (mặc định 20).
-- **`--headless`**:
-  - `1`: chạy Chrome **ẩn** (khuyến nghị khi chạy nhiều).
-  - `0`: mở Chrome để **debug xem Google Maps**.
-- **`--driver_path`** (tuỳ chọn):  
-  - Nếu môi trường **không có internet** hoặc Selenium Manager không tự tải được ChromeDriver, bạn truyền trực tiếp đường dẫn đến file `chromedriver`.
-
-### Kết quả sau khi chạy
-
-Tool tạo 2 file:
-- `top20_chim_bay.xlsx`  
-  - Danh sách top N điểm gần nhất theo **khoảng cách chim bay**.
-- `ket_qua_top20_duong_bo.xlsx`  
-  - Cột chính:
-    - `diem_can_do_id`, `origin_lat`, `origin_lng`
-    - `ma_phong_ban`, `ten_phong_ban`, `lat`, `lng`, `tinh_thanh`
-    - `khoang_cach_chim_bay_km`, `rank_chim_bay`
-    - `khoang_cach_duong_bo_km`, `thoi_gian_phut`, `rank_duong_bo`
-    - `status` (OK/FAILED), `error_message` (nếu lỗi).
-
----
-
-## 4. Chạy riêng bước vẽ bản đồ
-
-Sau khi đã có `ket_qua_top20_duong_bo.xlsx`, bạn có thể vẽ bản đồ:
+### Chay nhanh bang 1 toa do tu terminal
 
 ```bash
-cd "/media/trungdt2/New Volume/Work/tool_tinh_kc_dia_diem_moi"
-python map_viz.py \
-  --input ket_qua_top20_duong_bo.xlsx \
-  --output map_top20.html
+cd "/Users/pro201715inch/Documents/tool_tinh_kc_diem_gd_moi"
+./.venv/bin/python tool.py --coord "10.969499056814524,106.67685107587728" --data data/data.xlsx --top_n 20 --headless 1
 ```
 
-Kết quả:
-- File `map_top20.html` (mở bằng Chrome/Edge/Firefox):
-  - Marker **đỏ**: điểm cần đo.
-  - Marker **xanh**: các điểm top N.
-  - Đường nối từ điểm cần đo đến từng điểm top N.
-  - Tooltip đường: dạng `ĐB: X km; CB: Y km; rank CB: Z`.
+Khong can sua `data/DIA_DIEM_CAN_DO.xlsx` neu dung `--coord`.
 
----
+### Chay lenh truoc roi nhap toa do sau tren terminal
 
-## 5. Cách dùng cho các lần sau
+```bash
+cd "/Users/pro201715inch/Documents/tool_tinh_kc_diem_gd_moi"
+./.venv/bin/python tool.py --prompt_coord 1 --data data/data.xlsx --top_n 20 --headless 1
+```
 
-Cho mỗi lần chạy mới, quy trình cực ngắn:
-1. **Thay dữ liệu**:
-   - Ghi đè file `data/DIA_DIEM_CAN_DO.xlsx` bằng file mới (giữ đúng tên cột KINH ĐỘ / VĨ ĐỘ).
-   - Ghi đè file `data/data.xlsx` bằng file mới (giữ đúng cấu trúc cột đã dùng).
-2. **Chạy lệnh**:
-   - Tính lại khoảng cách + đo Google Maps:
-     ```bash
-     python tool.py --need data/DIA_DIEM_CAN_DO.xlsx --data data/data.xlsx --top_n 20 --headless 1
-     ```
-   - (Tuỳ chọn) Vẽ lại bản đồ:
-     ```bash
-     python map_viz.py --input ket_qua_top20_duong_bo.xlsx --output map_top20.html
-     ```
+Sau khi chay lenh, terminal se hien:
 
-**Không cần chỉnh sửa code** nếu cấu trúc cột đầu vào vẫn giữ như hiện tại.
+```text
+Nhập tọa độ dạng lat,lng:
+```
 
----
+Vi du nhap:
 
-## 6. Một số lưu ý & lỗi thường gặp
+```text
+10.969499056814524,106.67685107587728
+```
 
-- **Bị Google chặn / chậm**:
-  - Tool đã có `throttle` (delay ~1.2s mỗi request) và retry tối đa 3 lần.
-  - Nếu vẫn bị, có thể tăng `throttle_sec` trực tiếp trong `maps_selenium.py` hoặc tạm thời giảm `top_n`.
+### Ve ban do HTML
 
-- **Lỗi không tìm thấy ChromeDriver**:
-  - Kiểm tra Chrome đã cài chưa.
-  - Tải ChromeDriver đúng phiên bản Chrome, truyền `--driver_path`.
+```bash
+cd "/Users/pro201715inch/Documents/tool_tinh_kc_diem_gd_moi"
+./.venv/bin/python map_viz.py --input output/<timestamp>/ket_qua_top20_duong_bo.xlsx --output output/<timestamp>/map_top20.html
+```
 
-- **Lỗi cột không hợp lệ**:
-  - Kiểm tra lại 2 file Excel có đúng tên cột yêu cầu (nhất là tiếng Việt có dấu) và không bị đổi tên sheet/cột.
+### Chay giao dien don gian
 
+```bash
+cd "/Users/pro201715inch/Documents/tool_tinh_kc_diem_gd_moi"
+./.venv/bin/streamlit run streamlit_app.py
+```
 
+Giao dien cho phep:
+
+- nhap 1 toa do `lat,lng`
+- chon `top_n`
+- bam nut chay
+- xem bang ket qua
+- tai file Excel
+- xem ban do ngay tren trinh duyet
+- moi lan chay se tao them 1 thu muc moi trong `output/`
+
+### Chay 1 lenh tu dau den cuoi
+
+```bash
+cd "/Users/pro201715inch/Documents/tool_tinh_kc_diem_gd_moi"
+./.venv/bin/python tool.py --need data/DIA_DIEM_CAN_DO.xlsx --data data/data.xlsx --top_n 20 --headless 1
+./.venv/bin/python map_viz.py --input output/<timestamp>/ket_qua_top20_duong_bo.xlsx --output output/<timestamp>/map_top20.html
+```
+
+Hoac dung toa do nhap truc tiep:
+
+```bash
+cd "/Users/pro201715inch/Documents/tool_tinh_kc_diem_gd_moi"
+./.venv/bin/python tool.py --coord "10.969499056814524,106.67685107587728" --data data/data.xlsx --top_n 20 --headless 1
+./.venv/bin/python map_viz.py --input output/<timestamp>/ket_qua_top20_duong_bo.xlsx --output output/<timestamp>/map_top20.html
+```
+
+Hoac nhap toa do sau khi lenh da chay:
+
+```bash
+cd "/Users/pro201715inch/Documents/tool_tinh_kc_diem_gd_moi"
+./.venv/bin/python tool.py --prompt_coord 1 --data data/data.xlsx --top_n 20 --headless 1
+./.venv/bin/python map_viz.py --input output/<timestamp>/ket_qua_top20_duong_bo.xlsx --output output/<timestamp>/map_top20.html
+```
+
+### File output
+
+- `output/<timestamp>/top20_chim_bay.xlsx`
+- `output/<timestamp>/ket_qua_top20_duong_bo.xlsx`
+- `output/<timestamp>/map_top20.html`

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
+from pathlib import Path
 import sys
-import time
 from typing import Optional
 
 import numpy as np
@@ -13,6 +14,27 @@ import pandas as pd
 from haversine import haversine_vectorized
 from maps_selenium import create_driver, get_route_distance_time
 from preprocess import NeedPoint, build_coordinate_set, load_need_points
+
+
+def parse_inline_coordinate(raw: str) -> NeedPoint:
+    """Parse a single coordinate from CLI in the form 'lat,lng'."""
+    parts = [part.strip() for part in raw.split(",")]
+    if len(parts) != 2:
+        raise ValueError("Tọa độ phải có dạng 'lat,lng'")
+    try:
+        lat = float(parts[0])
+        lng = float(parts[1])
+    except ValueError as exc:
+        raise ValueError("Không đọc được tọa độ từ --coord") from exc
+    return NeedPoint(id=0, lat=lat, lng=lng)
+
+
+def prompt_for_coordinate() -> NeedPoint:
+    """Prompt for a single coordinate interactively in the terminal."""
+    raw = input("Nhập tọa độ dạng lat,lng: ").strip()
+    if not raw:
+        raise ValueError("Bạn chưa nhập tọa độ")
+    return parse_inline_coordinate(raw)
 
 
 def compute_topn_air(needs: list[NeedPoint], coord_df: pd.DataFrame, top_n: int) -> pd.DataFrame:
@@ -39,7 +61,7 @@ def compute_topn_air(needs: list[NeedPoint], coord_df: pd.DataFrame, top_n: int)
                     "rank_chim_bay": rank,
                 }
             )
-        print(f"[AIR] origin {idx}/{len(needs)} done")
+        print(f"[AIR] origin {idx}/{len(needs)} done", flush=True)
     return pd.DataFrame(results)
 
 
@@ -48,11 +70,13 @@ def enrich_with_driving(top_df: pd.DataFrame, headless: bool, driver_path: Optio
     driver = create_driver(headless=headless, driver_path=driver_path)
     enriched_rows = []
     try:
-        for i, row in top_df.iterrows():
+        total_by_origin = top_df.groupby("diem_can_do_id").size().to_dict()
+        for _, row in top_df.iterrows():
             print(
-                f"[GMAPS] origin {row['diem_can_do_id']} measure {row['rank_chim_bay']}/{top_df[top_df['diem_can_do_id']==row['diem_can_do_id']].shape[0]}..."
+                f"[GMAPS] origin {row['diem_can_do_id']} measure {row['rank_chim_bay']}/{total_by_origin[row['diem_can_do_id']]}...",
+                flush=True,
             )
-            distance_km, duration_min, status, err = get_route_distance_time(
+            distance_km, duration_min, status, err, session_broken = get_route_distance_time(
                 origin_lat=row["origin_lat"],
                 origin_lng=row["origin_lng"],
                 dest_lat=row["lat"],
@@ -60,6 +84,13 @@ def enrich_with_driving(top_df: pd.DataFrame, headless: bool, driver_path: Optio
                 driver=driver,
                 throttle_sec=throttle_sec,
             )
+            if session_broken:
+                print("[GMAPS] session died, recreating Chrome driver...", flush=True)
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+                driver = create_driver(headless=headless, driver_path=driver_path)
             row = row.copy()
             row["khoang_cach_duong_bo_km"] = distance_km
             row["thoi_gian_phut"] = duration_min
@@ -70,47 +101,17 @@ def enrich_with_driving(top_df: pd.DataFrame, headless: bool, driver_path: Optio
         driver.quit()
 
     enriched_df = pd.DataFrame(enriched_rows)
-    # Rank within each origin by driving distance then time
-    def _rank_group(group: pd.DataFrame) -> pd.DataFrame:
-        sorted_group = group.sort_values(
-            by=["khoang_cach_duong_bo_km", "thoi_gian_phut"], na_position="last"
-        ).reset_index(drop=True)
-        sorted_group["rank_duong_bo"] = np.arange(1, len(sorted_group) + 1)
-        return sorted_group
-
-    ranked = enriched_df.groupby("diem_can_do_id", group_keys=False).apply(_rank_group)
+    ranked = enriched_df.sort_values(
+        by=["diem_can_do_id", "khoang_cach_duong_bo_km", "thoi_gian_phut"],
+        na_position="last",
+    ).reset_index(drop=True)
+    ranked["rank_duong_bo"] = ranked.groupby("diem_can_do_id").cumcount() + 1
     return ranked
 
 
-def parse_args(argv):
-    parser = argparse.ArgumentParser(description="Tính khoảng cách chim bay + đường bộ (Google Maps).")
-    parser.add_argument("--need", required=True, help="Path DIA_DIEM_CAN_DO.xlsx")
-    parser.add_argument("--data", required=True, help="Path data.xlsx")
-    parser.add_argument("--top_n", type=int, default=20, help="Số điểm gần nhất theo chim bay")
-    parser.add_argument("--headless", type=int, default=1, help="1=headless (default), 0=hiển thị Chrome")
-    parser.add_argument("--driver_path", type=str, default=None, help="Đường dẫn ChromeDriver (tùy chọn)")
-    return parser.parse_args(argv)
-
-
-def main(argv=None):
-    args = parse_args(argv or sys.argv[1:])
-    headless = bool(args.headless)
-
-    print("Đọc dữ liệu...")
-    needs = load_need_points(args.need)
-    coord_df = build_coordinate_set(args.data)
-    if coord_df.empty:
-        raise SystemExit("Coordinate set trống sau khi xử lý data.xlsx")
-
-    print("Tính khoảng cách chim bay và xuất top20_chim_bay.xlsx ...")
-    top_air_df = compute_topn_air(needs, coord_df, args.top_n)
-    top_air_path = "top20_chim_bay.xlsx"
-    top_air_df.to_excel(top_air_path, index=False)
-    print(f"Đã ghi {top_air_path}")
-
-    print("Đo khoảng cách đường bộ qua Google Maps (Selenium)...")
-    result_df = enrich_with_driving(top_air_df, headless=headless, driver_path=args.driver_path)
-    result_df = result_df[
+def finalize_result_columns(result_df: pd.DataFrame) -> pd.DataFrame:
+    """Keep output columns in a stable order for exports and UI."""
+    return result_df[
         [
             "diem_can_do_id",
             "origin_lat",
@@ -130,12 +131,82 @@ def main(argv=None):
         ]
     ]
 
-    output_path = "ket_qua_top20_duong_bo.xlsx"
+
+def create_output_dir(base_dir: str = "output") -> Path:
+    """Create a timestamped output directory for one run."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_dir = Path(base_dir) / timestamp
+    output_dir.mkdir(parents=True, exist_ok=False)
+    return output_dir
+
+
+def run_pipeline(
+    needs: list[NeedPoint],
+    data_path: str,
+    top_n: int = 20,
+    headless: bool = True,
+    driver_path: Optional[str] = None,
+    base_output_dir: str = "output",
+) -> tuple[pd.DataFrame, pd.DataFrame, Path]:
+    """Run the full distance pipeline and optionally export Excel outputs."""
+    output_dir = create_output_dir(base_output_dir)
+    top_air_path = output_dir / "top20_chim_bay.xlsx"
+    output_path = output_dir / "ket_qua_top20_duong_bo.xlsx"
+
+    coord_df = build_coordinate_set(data_path)
+    if coord_df.empty:
+        raise ValueError("Coordinate set trống sau khi xử lý data.xlsx")
+
+    top_air_df = compute_topn_air(needs, coord_df, top_n)
+    top_air_df.to_excel(top_air_path, index=False)
+    print(f"Đã ghi {top_air_path}", flush=True)
+
+    result_df = enrich_with_driving(top_air_df, headless=headless, driver_path=driver_path)
+    result_df = finalize_result_columns(result_df)
     result_df.to_excel(output_path, index=False)
-    print(f"Hoàn tất. Kết quả: {output_path}")
+    print(f"Hoàn tất. Kết quả: {output_path}", flush=True)
+
+    return top_air_df, result_df, output_dir
+
+
+def parse_args(argv):
+    parser = argparse.ArgumentParser(description="Tính khoảng cách chim bay + đường bộ (Google Maps).")
+    parser.add_argument("--need", help="Path DIA_DIEM_CAN_DO.xlsx")
+    parser.add_argument("--coord", help="Tọa độ chạy nhanh dạng 'lat,lng', ví dụ '10.9694,106.6768'")
+    parser.add_argument("--prompt_coord", type=int, default=0, help="1 để nhập tọa độ trực tiếp trên terminal")
+    parser.add_argument("--data", required=True, help="Path data.xlsx")
+    parser.add_argument("--top_n", type=int, default=20, help="Số điểm gần nhất theo chim bay")
+    parser.add_argument("--headless", type=int, default=1, help="1=headless (default), 0=hiển thị Chrome")
+    parser.add_argument("--driver_path", type=str, default=None, help="Đường dẫn ChromeDriver (tùy chọn)")
+    args = parser.parse_args(argv)
+    if not args.need and not args.coord and not bool(args.prompt_coord):
+        parser.error("Cần truyền một trong ba: --need hoặc --coord hoặc --prompt_coord 1")
+    return args
+
+
+def main(argv=None):
+    args = parse_args(argv or sys.argv[1:])
+    headless = bool(args.headless)
+
+    print("Đọc dữ liệu...", flush=True)
+    if args.coord:
+        needs = [parse_inline_coordinate(args.coord)]
+    elif args.prompt_coord:
+        needs = [prompt_for_coordinate()]
+    else:
+        needs = load_need_points(args.need)
+
+    print("Tính khoảng cách chim bay và xuất top20_chim_bay.xlsx ...", flush=True)
+    print("Đo khoảng cách đường bộ qua Google Maps (Selenium)...", flush=True)
+    run_pipeline(
+        needs=needs,
+        data_path=args.data,
+        top_n=args.top_n,
+        headless=headless,
+        driver_path=args.driver_path,
+    )
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
