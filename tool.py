@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
+import os
 from pathlib import Path
 import sys
 from typing import Optional
@@ -132,31 +132,59 @@ def finalize_result_columns(result_df: pd.DataFrame) -> pd.DataFrame:
     ]
 
 
-def create_output_dir(base_dir: str = "output") -> Path:
-    """Create a timestamped output directory for one run."""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = Path(base_dir) / timestamp
-    output_dir.mkdir(parents=True, exist_ok=False)
-    return output_dir
+def validate_data_file(data_path: str | Path) -> Path:
+    """Validate a user-selected Excel input file before processing."""
+    input_file = Path(data_path).expanduser()
+    if not input_file.is_file():
+        raise FileNotFoundError(f"Không tìm thấy file dữ liệu: {input_file}")
+    if input_file.suffix.lower() not in {".xlsx", ".xls"}:
+        raise ValueError("File dữ liệu phải có định dạng .xlsx hoặc .xls")
+    return input_file
+
+
+def create_output_dir(base_dir: str | Path, output_name: str) -> Path:
+    """Create a uniquely named result directory inside a user-selected folder."""
+    output_base_dir = Path(base_dir).expanduser()
+    if not output_base_dir.is_dir():
+        raise NotADirectoryError(f"Thư mục lưu kết quả không tồn tại: {output_base_dir}")
+    if not os.access(output_base_dir, os.W_OK):
+        raise PermissionError(f"Không có quyền ghi vào thư mục: {output_base_dir}")
+
+    directory_name = output_name.strip()
+    if directory_name.lower().endswith(".xlsx"):
+        directory_name = Path(directory_name).stem
+    if not directory_name:
+        raise ValueError("Vui lòng nhập tên kết quả")
+    if Path(directory_name).name != directory_name or directory_name in {".", ".."}:
+        raise ValueError("Tên kết quả không được chứa đường dẫn")
+
+    candidate = output_base_dir / directory_name
+    suffix = 1
+    while candidate.exists():
+        candidate = output_base_dir / f"{directory_name}_{suffix}"
+        suffix += 1
+    candidate.mkdir()
+    return candidate
 
 
 def run_pipeline(
     needs: list[NeedPoint],
-    data_path: str,
+    data_path: str | Path,
     top_n: int = 20,
     headless: bool = True,
     driver_path: Optional[str] = None,
-    base_output_dir: str = "output",
+    output_base_dir: str | Path = ".",
+    output_name: str = "ket_qua",
 ) -> tuple[pd.DataFrame, pd.DataFrame, Path]:
     """Run the full distance pipeline and optionally export Excel outputs."""
-    output_dir = create_output_dir(base_output_dir)
+    input_file = validate_data_file(data_path)
+    coord_df = build_coordinate_set(input_file)
+    if coord_df.empty:
+        raise ValueError("Coordinate set trống sau khi xử lý file dữ liệu")
+
+    output_dir = create_output_dir(output_base_dir, output_name)
     top_air_path = output_dir / "top20_chim_bay.xlsx"
     output_path = output_dir / "ket_qua_top20_duong_bo.xlsx"
-
-    coord_df = build_coordinate_set(data_path)
-    if coord_df.empty:
-        raise ValueError("Coordinate set trống sau khi xử lý data.xlsx")
-
     top_air_df = compute_topn_air(needs, coord_df, top_n)
     top_air_df.to_excel(top_air_path, index=False)
     print(f"Đã ghi {top_air_path}", flush=True)
@@ -171,10 +199,12 @@ def run_pipeline(
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(description="Tính khoảng cách chim bay + đường bộ (Google Maps).")
-    parser.add_argument("--need", help="Path DIA_DIEM_CAN_DO.xlsx")
+    parser.add_argument("--need", help="Path to an external Excel file of points to measure")
+    parser.add_argument("--data", required=True, help="Path to the Excel location data")
+    parser.add_argument("--output_dir", required=True, help="Directory in which to save result files")
+    parser.add_argument("--output_name", required=True, help="Name of the result directory")
     parser.add_argument("--coord", help="Tọa độ chạy nhanh dạng 'lat,lng', ví dụ '10.9694,106.6768'")
     parser.add_argument("--prompt_coord", type=int, default=0, help="1 để nhập tọa độ trực tiếp trên terminal")
-    parser.add_argument("--data", required=True, help="Path data.xlsx")
     parser.add_argument("--top_n", type=int, default=20, help="Số điểm gần nhất theo chim bay")
     parser.add_argument("--headless", type=int, default=1, help="1=headless (default), 0=hiển thị Chrome")
     parser.add_argument("--driver_path", type=str, default=None, help="Đường dẫn ChromeDriver (tùy chọn)")
@@ -187,8 +217,9 @@ def parse_args(argv):
 def main(argv=None):
     args = parse_args(argv or sys.argv[1:])
     headless = bool(args.headless)
+    data_file = validate_data_file(args.data)
 
-    print("Đọc dữ liệu...", flush=True)
+    print(f"Đọc dữ liệu từ {data_file}...", flush=True)
     if args.coord:
         needs = [parse_inline_coordinate(args.coord)]
     elif args.prompt_coord:
@@ -200,10 +231,12 @@ def main(argv=None):
     print("Đo khoảng cách đường bộ qua Google Maps (Selenium)...", flush=True)
     run_pipeline(
         needs=needs,
-        data_path=args.data,
+        data_path=data_file,
         top_n=args.top_n,
         headless=headless,
         driver_path=args.driver_path,
+        output_base_dir=args.output_dir,
+        output_name=args.output_name,
     )
     return 0
 

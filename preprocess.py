@@ -1,9 +1,10 @@
-"""Preprocessing helpers for reading Excel inputs and building coordinate sets."""
+"""Preprocessing helpers for reading user inputs and building coordinate sets."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 import unicodedata
+from pathlib import Path
 from typing import List
 
 import numpy as np
@@ -36,7 +37,7 @@ def _safe_float(value):
 
 
 def load_need_points(path: str) -> List[NeedPoint]:
-    """Load points needing measurement from DIA_DIEM_CAN_DO.xlsx."""
+    """Load points needing measurement from an external Excel file."""
     df = pd.read_excel(path)
     # Normalize column names without diacritics to reduce typo risks
     col_map = {_normalize(c): c for c in df.columns}
@@ -55,9 +56,34 @@ def load_need_points(path: str) -> List[NeedPoint]:
     return needs
 
 
-def build_coordinate_set(data_path: str) -> pd.DataFrame:
-    """Build unique coordinate set from data.xlsx with optional province."""
+def build_coordinate_set(data_path: str | Path) -> pd.DataFrame:
+    """Build a unique coordinate set from a user-selected Excel file."""
     df = pd.read_excel(data_path)
+    direct_columns = {"Mã phòng ban", "Tên phòng ban", "KINH ĐỘ", "VĨ ĐỘ"}
+    if direct_columns.issubset(df.columns):
+        coord_df = df.loc[:, ["Mã phòng ban", "Tên phòng ban", "KINH ĐỘ", "VĨ ĐỘ"]].copy()
+        coord_df.columns = ["ma_phong_ban", "ten_phong_ban", "lng", "lat"]
+        coord_df["lng"] = coord_df["lng"].apply(_safe_float)
+        coord_df["lat"] = coord_df["lat"].apply(_safe_float)
+        coord_df["tinh_thanh"] = None
+        return coord_df.dropna(subset=["lng", "lat", "ma_phong_ban"]).drop_duplicates(
+            subset=["ma_phong_ban"]
+        ).reset_index(drop=True)
+
+    paired_columns = {
+        "Mã phòng ban 1",
+        "Tên phòng ban 1",
+        "KINH ĐỘ 1",
+        "VĨ ĐỘ 1",
+        "Mã phòng ban 2",
+        "Tên phòng ban 2",
+        "KINH ĐỘ 2",
+        "VĨ ĐỘ 2",
+    }
+    missing_columns = sorted(paired_columns.difference(df.columns))
+    if missing_columns:
+        raise ValueError(f"File không chứa cột bắt buộc: {', '.join(missing_columns)}")
+
     province_col = None
     for col in df.columns:
         lower = _normalize(str(col))

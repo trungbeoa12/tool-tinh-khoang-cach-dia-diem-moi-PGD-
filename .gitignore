@@ -16,6 +16,7 @@ ENV/
 .~lock.*
 
 # Results
+output/
 top20_chim_bay.xlsx
 ket_qua_top20_duong_bo.xlsx
 map_top20.html

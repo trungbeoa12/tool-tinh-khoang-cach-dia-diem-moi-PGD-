@@ -1,8 +1,0 @@
-cd "/Users/pro201715inch/Documents/tool_tinh_kc_diem_gd_moi"
-./.venv/bin/python -m pip install -r requirements.txt
-
-cd "/Users/pro201715inch/Documents/tool_tinh_kc_diem_gd_moi"
-./.venv/bin/streamlit run streamlit_app.py
-
-cd "/Users/pro201715inch/Documents/tool_tinh_kc_diem_gd_moi"
-./.venv/bin/python tool.py --coord "10.969499056814524,106.67685107587728" --data data/data.xlsx --top_n 20 --headless 1
